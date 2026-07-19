@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Sensitive security report
+    url: https://github.com/Fxxrz/wled-onewire-accessory-bus/security/advisories/new
+    about: Report a potentially exploitable issue privately.

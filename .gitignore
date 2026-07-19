@@ -1,0 +1,14 @@
+.DS_Store
+.pio/
+.vscode/
+build/
+build_output/
+release-assets/
+node_modules/
+__pycache__/
+*.pyc
+platformio_override.ini
+*.bin
+*.elf
+*.map
+*.log

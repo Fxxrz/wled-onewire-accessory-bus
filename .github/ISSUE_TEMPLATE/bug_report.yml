@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a reproducible OneWire Accessory Bus problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Remove credentials, private network data, and real identifiers before submitting.
+  - type: input
+    id: usermod
+    attributes:
+      label: Usermod commit or tag
+    validations:
+      required: true
+  - type: input
+    id: wled
+    attributes:
+      label: WLED commit/version
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Board, chip, flash size, and build environment
+    validations:
+      required: true
+  - type: textarea
+    id: bus
+    attributes:
+      label: OneWire hardware
+      description: GPIO, pullup voltage/value, approximate length/topology, device family/count, and power method.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior and recovery
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed secrets, private addresses, and real ROM IDs.
+          required: true
+        - label: I backed up the WLED configuration before testing apply/fallback behavior.
+          required: true

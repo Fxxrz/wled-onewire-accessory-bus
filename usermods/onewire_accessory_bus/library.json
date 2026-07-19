@@ -1,0 +1,20 @@
+{
+  "name": "onewire_accessory_bus",
+  "version": "0.1.0-beta.2",
+  "description": "Hotplug-aware OneWire accessory profiles and telemetry for WLED",
+  "keywords": ["wled", "onewire", "esp32", "home-assistant", "mqtt"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Fxxrz/wled-onewire-accessory-bus.git"
+  },
+  "license": "EUPL-1.2-or-later",
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "build": {
+    "libArchive": false,
+    "srcFilter": ["+<*>", "-<*.test.cpp>"]
+  },
+  "dependencies": {
+    "paulstoffregen/OneWire": "2.3.8"
+  }
+}

@@ -1,0 +1,149 @@
+name: Usermod CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  WLED_SHA: e39118333d3d5a9c93286243b3aa227e5ee4a713
+  PIO_VERSION: 6.1.19
+  SYFT_VERSION: 1.42.3
+  SYFT_DARWIN_AMD64_SHA256: c00d01b7c43504708c8922d643d1cbaefa62ca8876baa4d2c2cf4c3be43707a9
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  test-and-build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out Usermod
+        uses: https://github.com/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          path: usermod-export
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: https://github.com/actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20.19.5
+
+      - name: Set up Python
+        run: |
+          : "${FORGEJO_UV:?FORGEJO_UV must point to uv on the Forgejo runner}"
+          "$FORGEJO_UV" python install 3.11.9
+          python_path="$("$FORGEJO_UV" python find 3.11.9)"
+          python_env="$RUNNER_TEMP/owab-python-3.11.9"
+          "$FORGEJO_UV" venv --seed --python "$python_path" "$python_env"
+          echo "$python_env/bin" >> "$GITHUB_PATH"
+          "$python_env/bin/python3" --version
+
+      - name: Privacy guard
+        working-directory: usermod-export
+        run: |
+          private_ip='192''\.168\.[0-9]+\.[0-9]+'
+          local_path='/''Users/'
+          private_forge='git''\.fxrz\.de'
+          real_rom='09564208''0A00004C'
+          if grep -aRIE "${private_ip}|${local_path}|${private_forge}|${real_rom}" --exclude-dir=.git .; then
+            echo "Private development value found in public export"
+            exit 1
+          fi
+          if git show --format=fuller --no-ext-diff HEAD | grep -E "${private_ip}|${local_path}|${private_forge}|${real_rom}"; then
+            echo "Private development value found in release commit"
+            exit 1
+          fi
+          if git log --all --format='%ae%n%ce' | grep -Eqv '^[A-Za-z0-9+_.-]+@users\.noreply\.github\.com$'; then
+            echo "Non-noreply commit identity found in public history"
+            exit 1
+          fi
+          if git for-each-ref refs/tags --format='%(taggeremail)' \
+            | sed -e '/^$/d' -e 's/^<//' -e 's/>$//' \
+            | grep -Eqv '^[A-Za-z0-9+_.-]+@users\.noreply\.github\.com$'; then
+            echo "Non-noreply annotated-tag identity found in public history"
+            exit 1
+          fi
+
+      - name: Run executable and source-contract tests
+        working-directory: usermod-export
+        run: node --test usermods/onewire_accessory_bus/onewire_accessory_bus.test.js tools/release_workflow.test.js
+
+      - name: Check formatting
+        working-directory: usermod-export
+        run: git --no-pager show --check --format= HEAD
+
+      - name: Install PlatformIO
+        run: python -m pip install "platformio==${PIO_VERSION}"
+
+      - name: Check out pinned WLED source
+        run: |
+          git clone --filter=blob:none https://github.com/Aircoookie/WLED.git WLED
+          git -C WLED checkout "${WLED_SHA}"
+
+      - name: Assemble public corresponding source
+        run: |
+          cp -R usermod-export/usermods/onewire_accessory_bus WLED/usermods/
+          cp usermod-export/examples/platformio_override.example.ini WLED/platformio_override.ini
+
+      - name: Build WLED web assets
+        working-directory: WLED
+        run: |
+          npm ci
+          npm run build
+
+      - name: Record resolved PlatformIO metadata
+        working-directory: WLED
+        run: |
+          pio project metadata -e esp32dev_onewire_audio --json-output-path "$RUNNER_TEMP/owab-platformio-metadata.json"
+          python -c 'import json,sys; json.load(open(sys.argv[1]))' "$RUNNER_TEMP/owab-platformio-metadata.json"
+
+      - name: Build ESP32 AudioReactive integration
+        working-directory: WLED
+        run: pio run -e esp32dev_onewire_audio
+
+      - name: Restore validated PlatformIO metadata
+        working-directory: WLED
+        run: cp "$RUNNER_TEMP/owab-platformio-metadata.json" platformio-metadata.json
+
+      - name: Verify linked Usermods
+        run: |
+          grep -q "onewire_accessory_bus" WLED/.pio/build/esp32dev_onewire_audio/firmware.map
+          grep -q "audioreactive" WLED/.pio/build/esp32dev_onewire_audio/firmware.map
+
+      - name: Generate source/build SBOM
+        run: |
+          syft_root="$RUNNER_TEMP/owab-syft-${SYFT_VERSION}"
+          syft_archive="$syft_root/syft.tar.gz"
+          mkdir -p "$syft_root"
+          curl --fail --location --connect-timeout 15 --max-time 180 \
+            --retry 3 --retry-all-errors --proto '=https' --tlsv1.2 \
+            --output "$syft_archive" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_darwin_amd64.tar.gz"
+          printf '%s  %s\n' "$SYFT_DARWIN_AMD64_SHA256" "$syft_archive" | shasum -a 256 --check -
+          tar -xzf "$syft_archive" -C "$syft_root" syft
+          "$syft_root/syft" scan dir:WLED -o spdx-json=WLED/owab.spdx.json
+
+      - name: Verify deterministic release packaging
+        run: |
+          python usermod-export/tools/package_release.py \
+            --version ci \
+            --wled-tree WLED \
+            --metadata WLED/platformio-metadata.json \
+            --sbom WLED/owab.spdx.json \
+            --esptool "$HOME/.platformio/packages/tool-esptoolpy/esptool.py" \
+            --source-remote https://github.com/Fxxrz/wled-onewire-accessory-bus.git \
+            --output-dir release-package
+
+      - name: Verify local candidate evidence
+        run: |
+          test -s WLED/.pio/build/esp32dev_onewire_audio/firmware.bin
+          test -s WLED/.pio/build/esp32dev_onewire_audio/firmware.elf
+          test -s WLED/.pio/build/esp32dev_onewire_audio/firmware.map
+          test -s WLED/platformio-metadata.json
+          test -s WLED/owab.spdx.json
+          test -s release-package/SHA256SUMS
+          (cd release-package && shasum -a 256 --check SHA256SUMS)
